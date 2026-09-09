@@ -11,7 +11,7 @@ export default function Checkout() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Load real cart
+  // Load cart
   useEffect(() => {
     const savedCart =
       JSON.parse(localStorage.getItem("cart")) || [];
@@ -19,17 +19,298 @@ export default function Checkout() {
     setItems(savedCart);
   }, []);
 
-  // Calculate total
+  // Load Razorpay Checkout script
+  useEffect(() => {
+    const scriptId = "razorpay-checkout-script";
+
+    if (document.getElementById(scriptId)) {
+      return;
+    }
+
+    const script = document.createElement("script");
+
+    script.id = scriptId;
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+
+    document.body.appendChild(script);
+
+    return () => {
+      const existingScript =
+        document.getElementById(scriptId);
+
+      if (existingScript) {
+        existingScript.remove();
+      }
+    };
+  }, []);
+
+  // Calculate subtotal
   const subtotal = items.reduce(
     (total, item) =>
       total + item.price * item.quantity,
     0
   );
 
+  // Delivery charges
   const delivery = items.length > 0 ? 150 : 0;
 
+  // Final amount
   const totalAmount = subtotal + delivery;
 
+  // Convert cart items into order items
+  const getOrderItems = () => {
+    return items.map((item) => ({
+      pizza: item._id,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+    }));
+  };
+
+  // Save order in database
+  const saveOrder = async (token) => {
+    const orderItems = getOrderItems();
+
+    const response = await fetch(
+      "http://localhost:5000/api/orders",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+
+        body: JSON.stringify({
+          items: orderItems,
+          totalAmount,
+          deliveryAddress: address,
+          phone,
+          paymentMethod: payment,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.message || "Order creation failed"
+      );
+    }
+
+    return data;
+  };
+
+  // ================================
+  // CASH ON DELIVERY
+  // ================================
+  const handleCashOnDelivery = async (token) => {
+    const data = await saveOrder(token);
+
+    localStorage.removeItem("cart");
+
+    alert(
+      data.message ||
+        "Order placed successfully! 🍕"
+    );
+
+    navigate("/orders");
+  };
+
+  // ================================
+  // RAZORPAY PAYMENT
+  // ================================
+  const handleRazorpayPayment = async (token) => {
+    const razorpayKey =
+      import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+    // Check frontend Razorpay key
+    if (
+      !razorpayKey ||
+      razorpayKey === "YOUR_RAZORPAY_KEY_ID"
+    ) {
+      alert(
+        "Razorpay Key ID missing. Please add VITE_RAZORPAY_KEY_ID in frontend .env"
+      );
+      return;
+    }
+
+    // Check Razorpay script
+    if (!window.Razorpay) {
+      alert(
+        "Razorpay Checkout load nahi hua. Please refresh the page."
+      );
+      return;
+    }
+
+    // --------------------------------
+    // STEP 1: Create Razorpay Order
+    // --------------------------------
+    const createResponse = await fetch(
+      "http://localhost:5000/api/payment/create-order",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+
+        body: JSON.stringify({
+          amount: totalAmount,
+        }),
+      }
+    );
+
+    const createData = await createResponse.json();
+
+    if (!createResponse.ok || !createData.success) {
+      throw new Error(
+        createData.message ||
+          "Razorpay order creation failed"
+      );
+    }
+
+    const razorpayOrder = createData.order;
+
+    // --------------------------------
+    // STEP 2: Open Razorpay Checkout
+    // --------------------------------
+    const options = {
+      key: razorpayKey,
+
+      amount: razorpayOrder.amount,
+
+      currency: razorpayOrder.currency,
+
+      name: "Pizza Delivery",
+
+      description: "Pizza Order Payment",
+
+      order_id: razorpayOrder.id,
+
+      handler: async function (response) {
+        try {
+          setLoading(true);
+
+          // --------------------------------
+          // STEP 3: Verify Payment
+          // --------------------------------
+          const verifyResponse = await fetch(
+            "http://localhost:5000/api/payment/verify",
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+
+              body: JSON.stringify({
+                razorpay_order_id:
+                  response.razorpay_order_id,
+
+                razorpay_payment_id:
+                  response.razorpay_payment_id,
+
+                razorpay_signature:
+                  response.razorpay_signature,
+              }),
+            }
+          );
+
+          const verifyData =
+            await verifyResponse.json();
+
+          if (
+            !verifyResponse.ok ||
+            !verifyData.success
+          ) {
+            alert(
+              verifyData.message ||
+                "Payment verification failed"
+            );
+
+            return;
+          }
+
+          // --------------------------------
+          // STEP 4: Save Pizza Order
+          // --------------------------------
+          const orderData =
+            await saveOrder(token);
+
+          localStorage.removeItem("cart");
+
+          alert(
+            orderData.message ||
+              "Payment successful! Order placed! 🍕"
+          );
+
+          navigate("/orders");
+        } catch (error) {
+          console.error(
+            "Payment Success Error:",
+            error
+          );
+
+          alert(
+            error.message ||
+              "Payment successful but order save nahi ho saka."
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+
+      prefill: {
+        name: name,
+        contact: phone,
+      },
+
+      notes: {
+        address: address,
+      },
+
+      theme: {
+        color: "#e63946",
+      },
+
+      modal: {
+        ondismiss: function () {
+          setLoading(false);
+        },
+      },
+    };
+
+    const razorpay =
+      new window.Razorpay(options);
+
+    razorpay.on(
+      "payment.failed",
+      function (response) {
+        console.error(
+          "Razorpay Payment Failed:",
+          response.error
+        );
+
+        alert(
+          response.error?.description ||
+            "Payment failed. Please try again."
+        );
+
+        setLoading(false);
+      }
+    );
+
+    razorpay.open();
+  };
+
+  // ================================
+  // MAIN ORDER FUNCTION
+  // ================================
   const handleOrder = async (e) => {
     e.preventDefault();
 
@@ -47,54 +328,30 @@ export default function Checkout() {
       return;
     }
 
+    if (!name || !phone || !address) {
+      alert("Please fill all delivery information.");
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Convert cart items into order items
-      const orderItems = items.map((item) => ({
-        pizza: item._id,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-      }));
-
-      const response = await fetch(
-        "http://localhost:5000/api/orders",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-
-          body: JSON.stringify({
-            items: orderItems,
-            totalAmount,
-            deliveryAddress: address,
-            phone,
-            paymentMethod: payment,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        alert(data.message || "Order failed");
-        return;
+      // COD
+      if (payment === "Cash on Delivery") {
+        await handleCashOnDelivery(token);
       }
 
-      // Clear cart after successful order
-      localStorage.removeItem("cart");
-
-      alert("Order placed successfully! 🍕");
-
-      navigate("/orders");
-
+      // Razorpay
+      else {
+        await handleRazorpayPayment(token);
+      }
     } catch (error) {
-      console.error("Order Error:", error);
-      alert("Server se connection nahi ho raha");
+      console.error("Checkout Error:", error);
+
+      alert(
+        error.message ||
+          "Checkout mein error aa gaya."
+      );
     } finally {
       setLoading(false);
     }
@@ -102,7 +359,6 @@ export default function Checkout() {
 
   return (
     <div style={styles.page}>
-
       {/* NAVBAR */}
       <nav style={styles.nav}>
         <h2>🍕 Pizza Delivery</h2>
@@ -113,14 +369,16 @@ export default function Checkout() {
       </nav>
 
       <main style={styles.container}>
-
         <h1>Checkout 🧾</h1>
 
         {items.length === 0 ? (
           <div style={styles.empty}>
             <h2>Your cart is empty 🍕</h2>
 
-            <Link to="/menu" style={styles.menuButton}>
+            <Link
+              to="/menu"
+              style={styles.menuButton}
+            >
               Go to Menu
             </Link>
           </div>
@@ -129,7 +387,6 @@ export default function Checkout() {
             onSubmit={handleOrder}
             style={styles.form}
           >
-
             <h2>Delivery Information</h2>
 
             {/* NAME */}
@@ -183,13 +440,17 @@ export default function Checkout() {
               }
               style={styles.input}
             >
-              <option>Cash on Delivery</option>
-              <option>Credit / Debit Card</option>
+              <option>
+                Cash on Delivery
+              </option>
+
+              <option>
+                Credit / Debit Card
+              </option>
             </select>
 
             {/* ORDER SUMMARY */}
             <div style={styles.summary}>
-
               <h3>Order Summary</h3>
 
               {items.map((item) => (
@@ -198,30 +459,37 @@ export default function Checkout() {
                   style={styles.row}
                 >
                   <span>
-                    {item.name} × {item.quantity}
+                    {item.name} ×{" "}
+                    {item.quantity}
                   </span>
 
                   <span>
-                    Rs. {item.price * item.quantity}
+                    Rs.{" "}
+                    {item.price *
+                      item.quantity}
                   </span>
                 </div>
               ))}
 
               <div style={styles.row}>
                 <span>Delivery</span>
-                <span>Rs. {delivery}</span>
+
+                <span>
+                  Rs. {delivery}
+                </span>
               </div>
 
               <hr />
 
               <div style={styles.total}>
-                <span>Total Amount</span>
+                <span>
+                  Total Amount
+                </span>
 
                 <strong>
                   Rs. {totalAmount}
                 </strong>
               </div>
-
             </div>
 
             {/* BUTTON */}
@@ -234,13 +502,14 @@ export default function Checkout() {
               }}
             >
               {loading
-                ? "Placing Order..."
+                ? "Processing..."
+                : payment ===
+                  "Credit / Debit Card"
+                ? "Pay with Razorpay 💳"
                 : "Place Order 🍕"}
             </button>
-
           </form>
         )}
-
       </main>
     </div>
   );
@@ -278,7 +547,8 @@ const styles = {
     padding: "35px",
     borderRadius: "18px",
     marginTop: "25px",
-    boxShadow: "0 8px 25px rgba(0,0,0,0.08)",
+    boxShadow:
+      "0 8px 25px rgba(0,0,0,0.08)",
   },
 
   input: {

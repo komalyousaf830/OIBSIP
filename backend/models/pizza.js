@@ -28,6 +28,26 @@ const pizzaSchema = new mongoose.Schema(
       required: true,
     },
 
+    base: {
+      type: String,
+      default: "",
+    },
+
+    sauce: {
+      type: String,
+      default: "",
+    },
+
+    cheese: {
+      type: String,
+      default: "",
+    },
+
+    vegetables: {
+      type: [String],
+      default: [],
+    },
+
     available: {
       type: Boolean,
       default: true,

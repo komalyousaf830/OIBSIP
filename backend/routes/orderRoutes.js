@@ -1,9 +1,11 @@
+
 const express = require("express");
 
 const {
   createOrder,
   getMyOrders,
   getAllOrders,
+  updateOrderStatus,
 } = require("../controllers/orderController");
 
 const protect = require("../middleware/authMiddleware");
@@ -19,4 +21,8 @@ router.get("/my-orders", protect, getMyOrders);
 // Get all orders for admin
 router.get("/all", protect, getAllOrders);
 
+// Update order status
+router.put("/:id/status", protect, updateOrderStatus);
+
 module.exports = router;
+

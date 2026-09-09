@@ -44,9 +44,19 @@ const orderRoutes = require("./routes/orderRoutes");
 
 app.use("/api/orders", orderRoutes);
 
+// Inventory routes
+const inventoryRoutes = require("./routes/inventoryRoutes");
+
+app.use("/api/inventory", inventoryRoutes);
+
+// Payment routes
+const paymentRoutes = require("./routes/paymentRoutes");
+
+app.use("/api/payment", paymentRoutes);
+
 // Server
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-})
+});

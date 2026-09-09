@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -7,44 +8,51 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      const token = localStorage.getItem("token");
+  // Fetch user's orders
+  const fetchOrders = async () => {
+    const token = localStorage.getItem("token");
 
-      if (!token) {
-        alert("Please login first!");
-        navigate("/login");
+    if (!token) {
+      alert("Please login first!");
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/orders/my-orders",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.message || "Failed to load orders");
         return;
       }
 
-      try {
-        const response = await fetch(
-          "http://localhost:5000/api/orders/my-orders",
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+      setOrders(data.orders || []);
+    } catch (error) {
+      console.error("Orders Error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          alert(data.message || "Failed to load orders");
-          return;
-        }
-
-        setOrders(data.orders);
-      } catch (error) {
-        console.error("Orders Error:", error);
-        alert("Server se connection nahi ho raha");
-      } finally {
-        setLoading(false);
-      }
-    };
-
+  useEffect(() => {
     fetchOrders();
+
+    // Automatically check for updated order status
+    const interval = setInterval(() => {
+      fetchOrders();
+    }, 10000);
+
+    return () => clearInterval(interval);
   }, [navigate]);
 
   if (loading) {
@@ -84,9 +92,7 @@ export default function Orders() {
           <div style={styles.empty}>
             <h2>No orders yet 🍕</h2>
 
-            <p>
-              You haven't placed any orders yet.
-            </p>
+            <p>You haven't placed any orders yet.</p>
 
             <Link to="/menu" style={styles.menuButton}>
               Browse Menu
@@ -106,20 +112,17 @@ export default function Orders() {
                 </p>
 
                 <div style={styles.items}>
-                  {order.items.map((item, index) => (
+                  {order.items?.map((item, index) => (
                     <p key={index}>
-                      🍕 {item.name} × {item.quantity}
+                      🍕 {item.name || item.pizza?.name || "Pizza"} ×{" "}
+                      {item.quantity}
                     </p>
                   ))}
                 </div>
 
-                <p>
-                  📍 {order.deliveryAddress}
-                </p>
+                <p>📍 {order.deliveryAddress}</p>
 
-                <p>
-                  📱 {order.phone}
-                </p>
+                <p>📱 {order.phone}</p>
               </div>
 
               {/* RIGHT */}
@@ -134,14 +137,18 @@ export default function Orders() {
                     background:
                       order.status === "Delivered"
                         ? "#d8f3dc"
+                        : order.status === "Cancelled"
+                        ? "#f8d7da"
                         : "#fff3cd",
                     color:
                       order.status === "Delivered"
                         ? "#2d6a4f"
+                        : order.status === "Cancelled"
+                        ? "#842029"
                         : "#856404",
                   }}
                 >
-                  {order.status}
+                  {order.status || "Pending"}
                 </span>
               </div>
             </div>
@@ -247,3 +254,4 @@ const styles = {
     borderRadius: "8px",
   },
 };
+
