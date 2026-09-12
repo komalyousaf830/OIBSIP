@@ -5,3 +5,6 @@ node_modules/
 dist/
 build/
 .vscode/
+.git-backup/
+local-backup/
+*.backup
